@@ -9,6 +9,7 @@ class CashFlowGroupByTest < ApplicationSystemTestCase
     @user.update!(preferences: @user.preferences.merge("preview_features_enabled" => true, "cashflow_preview_enabled" => true))
     category = @user.family.categories.create!(name: "Group By Shopping", color: "#123456")
     account = @user.family.accounts.create!(name: "Group By Checking", currency: "USD", balance: 0, accountable: Depository.new)
+    @account_node_selector = "svg [data-node-id='account_#{account.id}'][aria-label*='Group By Checking']"
     create_transaction(account: account, category: category, amount: 100, date: @month)
   end
 
@@ -17,17 +18,18 @@ class CashFlowGroupByTest < ApplicationSystemTestCase
     visit root_path(start_date: @month.iso8601, end_date: Date.current.iso8601)
     chart = find("#cashflow-preview [data-preview-sankey-chart-target='chart']", match: :first)
     assert_selector "#cashflow-preview svg .sankey-link"
-    assert_no_selector "#cashflow-preview svg text", text: "Group By Checking"
+    chart.assert_no_selector @account_node_selector
 
     within("#cashflow-preview") { click_button "Account" }
 
-    chart.assert_selector "svg text", text: "Group By Checking"
+    # Overlapping labels can be hidden; the rendered account node proves the grouping changed.
+    chart.assert_selector @account_node_selector
     assert_selector "#cashflow-preview button[aria-pressed='true']", text: "Account"
     assert_nil find("#cashflow-preview")["data-sankey-comparison"].presence, "only the category view is compared with the legacy chart"
 
     visit root_path(start_date: @month.iso8601, end_date: Date.current.iso8601)
     find("#cashflow-preview [data-preview-sankey-chart-target='chart']", match: :first)
-      .assert_selector "svg text", text: "Group By Checking"
+      .assert_selector @account_node_selector
     assert_equal "account", @user.reload.cashflow_sankey_group_by
   end
 
