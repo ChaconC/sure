@@ -380,7 +380,7 @@ class Budget < ApplicationRecord
     unused_segment_id = "unused"
 
     # Continuous gray segment for empty budgets
-    return [ { color: "var(--budget-unallocated-fill)", amount: 1, id: unused_segment_id } ] unless allocations_valid?
+    return [ { color: "var(--budget-unallocated-fill)", amount: 1, id: unused_segment_id } ] unless initialized? && (allocations_valid? || total_rolled_over.positive?)
 
     segments = donut_budget_categories.map do |bc|
       { color: bc.category.color, amount: budget_category_actual_spending(bc), id: bc.id }
@@ -458,13 +458,14 @@ class Budget < ApplicationRecord
   end
 
   def available_to_spend
-    (budgeted_spending || 0) - actual_spending
+    (budgeted_spending || 0) + total_rolled_over - actual_spending
   end
 
   def percent_of_budget_spent
-    return 0 unless budgeted_spending > 0
+    spendable = (budgeted_spending || 0) + total_rolled_over
+    return 0 unless spendable > 0
 
-    (actual_spending / budgeted_spending.to_f) * 100
+    (actual_spending / spendable.to_f) * 100
   end
 
   def overage_percent
@@ -490,7 +491,7 @@ class Budget < ApplicationRecord
     (budgeted_spending || 0) - allocated_spending
   end
 
-  # Informational aggregate only -- deliberately kept out of
+  # Available for consumption, but deliberately kept out of
   # `allocated_spending` and `available_to_allocate`, which stay a pure
   # "what did I plan to spend this month" pair. Ring-fenced subcategories
   # carry their own surplus and their parent's is net of theirs, so summing

@@ -173,6 +173,47 @@ class Assistant::Function::GetBudgetTest < ActiveSupport::TestCase
     end
   end
 
+  test "rollover totals and zero allocation subcategories match spendable funds" do
+    user = users(:josh)
+    family = user.family
+    parent = family.categories.create!(name: "Annual expenses", color: "#6172F3")
+    fund = family.categories.create!(name: "Annual service", parent: parent, color: "#6172F3")
+    first = Budget.find_or_bootstrap(family, start_date: 2.months.ago, user: user)
+    first.update!(budgeted_spending: 1_200)
+    first.budget_categories.find_by!(category: parent).update!(budgeted_spending: 1_200)
+    first.budget_categories.find_by!(category: fund).update!(budgeted_spending: 1_200, rollover_enabled: true)
+    second = Budget.find_or_bootstrap(family, start_date: 1.month.ago, user: user)
+    second.update!(budgeted_spending: 0)
+    account = family.accounts.create!(
+      accountable: Depository.new, name: "Fund checking", currency: "USD",
+      balance: 2_000, status: "active", owner: user
+    )
+    account.entries.create!(
+      entryable: Transaction.new(category: fund), name: "Annual service payment",
+      date: second.start_date, amount: 300, currency: "USD"
+    )
+
+    result = Assistant::Function::GetBudget.new(user).call("month" => second.start_date.strftime("%Y-%m"))
+    month = result[:months].sole
+    totals = month[:totals]
+    category = month[:categories].find { |item| item[:name] == "Annual expenses" }
+    child = category[:subcategories].sole
+
+    assert_equal "$0.00", totals[:budgeted_spending]
+    assert_equal "$0.00", totals[:allocated_spending]
+    assert_equal "$0.00", totals[:available_to_allocate]
+    assert_equal "$300.00", totals[:actual_spending]
+    assert_equal "$900.00", totals[:available_to_spend]
+    assert_equal "25.0%", totals[:percent_of_budget_spent]
+    assert_equal "0.0%", totals[:overage_percent]
+    assert_equal "$900.00", category[:available]
+    assert_equal "$900.00", child[:available]
+    assert_equal "$0.00", child[:budgeted]
+    assert_equal "25.0%", child[:percent_spent]
+    assert_equal "on_track", child[:status]
+    assert_not child[:inherits_parent_budget]
+  end
+
   test "totals expose budget pacing fields" do
     result = @function.call({})
     totals = result[:months].first[:totals]
